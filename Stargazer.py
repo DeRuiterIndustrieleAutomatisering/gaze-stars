@@ -98,7 +98,7 @@ class Stargazer:
                 # reverse repo
                 sorted_repos = repos[::-1]
             # 生成表格内容
-            text += f"## {list_name}\n\n"
+            text += f"## {list_name}:\n\n"
             text += "| REPO | Descr | Stars |\n"
             text += "|----------|------|-------|\n"
             for key, repo in sorted_repos:
