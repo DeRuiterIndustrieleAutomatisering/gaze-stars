@@ -6,10 +6,10 @@
 # @Contact :   zhuozhiyongde@126.com
 # @Software:   Visual Studio Code
 
+import html
 import json
 import os
 import re
-from collections import OrderedDict
 import requests
 
 
@@ -34,7 +34,7 @@ class Stargazer:
         }
         all_repos = {}
         while url:
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=30)
             response.raise_for_status()
             for repo in response.json():
                 all_repos[repo["full_name"]] = {
@@ -51,27 +51,61 @@ class Stargazer:
 
     def get_lists(self):
         url = f"https://github.com/{self.username}?tab=stars"
-        response = requests.get(url)
-        pattern = f'href="/stars/{self.username}/lists/(\S+)".*?<h3 class="f4 text-bold no-wrap mr-3">(.*?)</h3>'
-        match = re.findall(pattern, response.text, re.DOTALL)
-        self.star_lists = [(url, name.strip()) for url, name in match]
+        response = requests.get(url, timeout=30, headers={"User-Agent": "Stargazer"})
+        response.raise_for_status()
+
+        list_map = {}
+        pattern = rf'href="(/stars/{re.escape(self.username)}/lists/[^"?#]+)"[^>]*>(.*?)</a>'
+        matches = re.findall(pattern, response.text, re.DOTALL | re.IGNORECASE)
+
+        for href, name_html in matches:
+            list_slug = href.rstrip("/").split("/")[-1]
+            cleaned = re.sub(r"<[^>]+>", "", name_html)
+            cleaned = html.unescape(cleaned).strip()
+            list_map[list_slug] = cleaned or list_slug.replace("-", " ").title()
+
+        self.star_lists = [(slug, name) for slug, name in list_map.items()]
         return self.star_lists
 
     def get_list_repos(self, list_name):
         url = "https://github.com/stars/{username}/lists/{list_name}?page={page}"
         page = 1
         self.star_list_repos.setdefault(list_name, [])
+        seen = set()
 
         while True:
             current_url = url.format(
                 username=self.username, list_name=list_name, page=page
             )
-            response = requests.get(current_url, timeout=30)
-            pattern = r'<h3>\s*<a href="[^"]*">\s*<span class="text-normal">(\S+) / </span>(\S+)\s+</a>\s*</h3>'
-            match = re.findall(pattern, response.text)
-            if not match:
+            response = requests.get(
+                current_url,
+                timeout=30,
+                headers={"User-Agent": "Stargazer"},
+            )
+            response.raise_for_status()
+
+            matches = re.findall(
+                r'href="/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)"',
+                response.text,
+            )
+
+            if not matches:
                 break
-            self.star_list_repos[list_name].extend(match)
+
+            new_entries = []
+            for owner, repo in matches:
+                if owner == self.username:
+                    continue
+                candidate = f"{owner}/{repo}"
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                new_entries.append((owner, repo))
+
+            if not new_entries:
+                break
+
+            self.star_list_repos[list_name].extend(new_entries)
             page += 1
 
         return self.star_list_repos[list_name]
@@ -84,21 +118,16 @@ class Stargazer:
     def generate_readme(self):
         text = ""
 
-        # 生成分类表格
         for list_url, list_name in self.star_lists:
-            # Get the current classification repo and sort by stars in descending order
             repos = [
                 (f"{user}/{repo}", self.data[f"{user}/{repo}"])
                 for user, repo in self.star_list_repos.get(list_url, [])
                 if f"{user}/{repo}" in self.data
             ]
-            # sorted_repos = sorted(repos, key=lambda x: x[1]["stars"], reverse=True)
             if self.sort_by == "stars":
                 sorted_repos = sorted(repos, key=lambda x: x[1]["stars"], reverse=True)
             else:
-                # reverse repo
                 sorted_repos = repos[::-1]
-            # 生成表格内容
             text += f"## {list_name}:\n\n"
             text += "| REPO | Descr | Stars |\n"
             text += "|----------|------|-------|\n"
@@ -108,7 +137,6 @@ class Stargazer:
                 text += f"| [{key}](https://github.com/{key}) | {desc} | ⭐{repo['stars']} |\n"
             text += "\n"
 
-        # 生成未分类表格
         if self.sort_by == "stars":
             unlisted = sorted(
                 [key for key in self.data if not self.data[key]["listed"]],
@@ -132,17 +160,16 @@ class Stargazer:
 
         text += "\n"
 
-        # 生成完整README
-        with open(self.template, "r") as f:
+        with open(self.template, "r", encoding="utf-8") as f:
             template = f.read()
 
-        with open(self.output, "w") as f:
+        with open(self.output, "w", encoding="utf-8") as f:
             f.write(template.replace("[[GENERATE HERE]]", text.strip()))
 
 
 if __name__ == "__main__":
     stargazer = Stargazer()
-    stargazer.get_all_starred()  # 获取所有starred仓库
-    stargazer.get_lists()  # 获取分类列表
-    stargazer.get_all_repos()  # 获取每个分类的仓库
-    stargazer.generate_readme()  # 生成README
+    stargazer.get_all_starred()
+    stargazer.get_lists()
+    stargazer.get_all_repos()
+    stargazer.generate_readme()
