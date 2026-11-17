@@ -115,6 +115,18 @@ class Stargazer:
             self.get_list_repos(list_url)
         return self.star_list_repos
 
+    @staticmethod
+    def format_repo_line(name, repo):
+        description = " ".join((repo["description"] or "").split())
+        if len(description) > 140:
+            description = description[:137].rstrip() + "..."
+
+        line = f"- [{name}](https://github.com/{name})"
+        if description:
+            line += f" — {description}"
+        line += f" (stars: {repo['stars']:,})"
+        return line
+
     def generate_readme(self):
         text = ""
 
@@ -128,13 +140,14 @@ class Stargazer:
                 sorted_repos = sorted(repos, key=lambda x: x[1]["stars"], reverse=True)
             else:
                 sorted_repos = repos[::-1]
-            text += f"## {list_name}:\n\n"
-            text += "| REPO | Descr | Stars |\n"
-            text += "|----------|------|-------|\n"
-            for key, repo in sorted_repos:
-                repo["listed"] = True
-                desc = repo["description"].replace("|", "\\|")
-                text += f"| [{key}](https://github.com/{key}) | {desc} | ⭐{repo['stars']} |\n"
+
+            text += f"## {list_name}\n\n"
+            if not sorted_repos:
+                text += "_No repositories in this list._\n\n"
+            else:
+                for key, repo in sorted_repos:
+                    repo["listed"] = True
+                    text += self.format_repo_line(key, repo) + "\n\n"
             text += "\n"
 
         if self.sort_by == "stars":
@@ -148,15 +161,11 @@ class Stargazer:
             unlisted = unlisted[::-1]
 
         text += "## Repo-x\n\n"
-        text += "| REPO | Descr | Stars |\n"
-        text += "|----------|------|-------|\n"
-
         if not unlisted:
-            text += "| *All repo classified* | | |\n"
+            text += "_All repositories are classified._\n\n"
         else:
             for k in unlisted:
-                desc = self.data[k]["description"].replace("|", "\\|")
-                text += f"| [{k}](https://github.com/{k}) | {desc} | ⭐{self.data[k]['stars']} |\n"
+                text += self.format_repo_line(k, self.data[k]) + "\n\n"
 
         text += "\n"
 
